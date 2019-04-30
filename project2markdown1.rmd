@@ -1,0 +1,399 @@
+---
+title: "TMA4300 Exercise 2"
+author: "Håkon Gryvill, Even M. Myklebust"
+date: "February 22, 2019"
+output: pdf_document
+header-includes:
+  - \usepackage{xcolor}
+  - \usepackage{mathtools}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(spam)
+library(fields)
+library(INLA)
+library(MASS)
+library(coda)
+set.seed(42)
+```
+
+# Exercise 1
+
+## a) Deriving the full posterior
+
+Using Bayes' rule (which basically amounts to using the rule of conditional probability and then conditioning on the parameters for which we have priors), we rewrite it like this: 
+
+$$
+\begin{aligned}
+p(\boldsymbol{\eta}, \boldsymbol{u}, \kappa_u, \kappa_v | \boldsymbol{y})  
+= \frac{p(\boldsymbol{\eta}, \boldsymbol{u}, \kappa_u, \kappa_v, \boldsymbol{y})}{p(y)}
+= \frac{p(\boldsymbol{y} | \boldsymbol{\eta}, \boldsymbol{u}, \kappa_u, \kappa_v) p(\boldsymbol{\eta} | \boldsymbol{u}, \kappa_u, \kappa_v) p(\boldsymbol{u} | \kappa_u, \kappa_v) p(\kappa_u) p(\kappa_v)}{p(y)}
+\end{aligned}
+$$
+
+Using the known dependencies and distributions for the problem, we can simplify the expression. $\boldsymbol{y}$ is given, so the denominator is just a constant, so the following holds: 
+
+$$
+\begin{aligned}
+p(\boldsymbol{\eta}, \boldsymbol{u}, \kappa_u, \kappa_v | \boldsymbol{y}) 
+& \propto \left( \prod_{i = 1}^{n} p(y_i | \eta_i) \right) p(\boldsymbol{\eta} | \boldsymbol{u}, \kappa_v) p(\boldsymbol{u} | \kappa_u) p(\kappa_u) p(\kappa_v) \\
+& \propto \left( \prod_{i = 1}^{n} \frac{(E_i exp(\eta_i))^{y_i}}{y_i!} exp(E_i exp(\eta_i)) \right) \kappa_v^{\frac{n}{2}} exp(-\frac{\kappa_v}{2}(\boldsymbol{\eta} - \boldsymbol{u})^T (\boldsymbol{\eta} - \boldsymbol{u})) \\
+& \qquad \kappa_u^\frac{n-1}{2} exp(-\frac{\kappa_u}{2}\boldsymbol{u}^T R \boldsymbol{u}) \kappa_u ^{\alpha_u - 1} exp(-\beta_u\kappa_u) \kappa_v^{\alpha_v - 1}exp{-\beta_v\kappa_v} \\
+ \propto \kappa_u^{\frac{n-1}{2} + \alpha_u - 1} \kappa_v^{\frac{n}{2} + \alpha_v - 1} & exp \left( -\beta_u\kappa_u -\beta_v\kappa_v -\frac{\kappa_v}{2}(\boldsymbol{\eta} - \boldsymbol{u})^T (\boldsymbol{\eta} - \boldsymbol{u}) -\frac{\kappa_u}{2}\boldsymbol{u}^T R \boldsymbol{u} - \sum_i (y_i\eta_i - E_i exp(\eta_i))\right) \\ 
+\end{aligned}
+$$
+As we were required to show. 
+
+## b) 
+
+$$
+f(\eta_i) = y_i\eta_i - E_i exp(\eta_i) \\
+f'(\eta_i) = y_i - E_i exp(\eta_i) \\
+f''(\eta_i) = E_i exp(\eta_i) \\
+$$
+Using the definition of the Taylor expansion:
+$$
+\begin{aligned}
+\hat{f}(\eta_i) & = f(z_i) + f'(z_i)(\eta_i-z_i) + \frac{f''(z_i)}{2} (\eta_i - z_i)^2 \\
+& = y_i z_i - E_i exp(z_i) + (y_i - E_i exp(z_i))(\eta_i - z_i) - \frac{E_i exp(z_i)}{2}(\eta_i - z_i)^2 \\
+& = y_iz_i \textcolor{blue}{- E_i exp(z_i)} \textcolor{red}{+ y_i}\eta_i - y_iz_i \textcolor{red}{- E_i exp(z_i)}\eta_i \textcolor{blue}{+ E_i exp(z_i)z_i} - \frac{\textcolor{green}{E_i exp(z_i)}}{2}\eta_i^2 \textcolor{blue}{- \frac{E_i exp(z_i)}{2}z_i^2} \textcolor{red}{+ E_i exp(z_i)\eta_iz_i} \\
+& = \textcolor{blue}{a_i} + \textcolor{red}{b_i}\eta_i - \frac{1}{2}\textcolor{green}{c_i}\eta_i^2 \\
+\end{aligned}
+$$
+
+## c)
+In the full conditional probabilities of a variable, everything that does not contain the variable can be treated as a constant, since we condition on it. We get the following full conditional distributions: 
+
+(Her må vi kanskje argumentere litt bedre for det vi gjør, spør noen andre.)
+
+$$
+\begin{aligned}
+p(\kappa_u|\boldsymbol{y}, \kappa_v, \boldsymbol{\eta}, \boldsymbol{u}) & \propto \kappa_u^{\frac{n-1}{2} + \alpha_u - 1}\text{exp} \left( -\beta_u \kappa_u - \frac{\kappa_u}{2} \boldsymbol{u}^T R \boldsymbol{u} \right) \\
+p(\kappa_v|\boldsymbol{y}, \kappa_u, \boldsymbol{\eta}, \boldsymbol{u}) & \propto \kappa_v^{\frac{n}{2} + \alpha_v - 1}\text{exp} \left( -\beta_v \kappa_v - \frac{\kappa_v}{2} (\boldsymbol{\eta} - \boldsymbol{u})^T(\boldsymbol{\eta} - \boldsymbol{u}) \right) \\
+p(\boldsymbol{u} | \boldsymbol{y}, \kappa_v, \kappa_u, \boldsymbol{\eta}) & \propto \text{exp} \left( -\frac{\kappa_v}{2} (\boldsymbol{\eta} - \boldsymbol{u})^T(\boldsymbol{\eta} - \boldsymbol{u}) - \frac{\kappa_u}{2} \boldsymbol{u}^T R \boldsymbol{u} \right) \\
+& \propto \text{exp} \left( -\frac{\kappa_v}{2} (\boldsymbol{\eta}^T\boldsymbol{\eta} - 2\boldsymbol{\eta}^T\boldsymbol{u} + \boldsymbol{u}^T\boldsymbol{u}) - \frac{\kappa_u}{2} \boldsymbol{u}^T R \boldsymbol{u} \right) \\
+& \propto \text{exp} \left( -\frac{1}{2} (\boldsymbol{u}^T \kappa_v \mathcal{I} \boldsymbol{u}) - \frac{1}{2} \boldsymbol{u}^T \kappa_u R \boldsymbol{u} + \kappa_v\boldsymbol{\eta}^T\boldsymbol{u} \right) \\
+& \propto \text{exp} \left( -\frac{1}{2} \boldsymbol{u}^T(\kappa_v \mathcal{I} + \kappa_u R)\boldsymbol{u} + \kappa_v\boldsymbol{\eta}^T\boldsymbol{u} \right) \\
+p(\boldsymbol{\eta} | \boldsymbol{y}, \kappa_v, \kappa_u, \boldsymbol{u}) & \propto \text{exp} \left( -\frac{1}{2} \boldsymbol{\eta}^T(\kappa_v \mathcal{I})\boldsymbol{\eta} + \boldsymbol{\eta}^T(\kappa_v \boldsymbol{u}) + \boldsymbol{\eta}^T\boldsymbol{y} - \text{exp}(\boldsymbol{\eta})^T \boldsymbol{E} \right) \\
+\end{aligned}
+$$
+Note that the $\boldsymbol{\eta}^T\boldsymbol{\eta}$ term is removed since it is constant in $\boldsymbol{u}$, and that $p(\boldsymbol{u} | y, \kappa_v, \kappa_u, \boldsymbol{\eta})$ is on canonical normal form with canonical parameters $\Sigma^{-1} = \kappa_v \mathcal{I} + \kappa_u R$ (precision matrix) and $b = \kappa_v\boldsymbol{\eta}$.
+
+# Exercise 2
+
+```{r,eval=TRUE}
+R_matrix = load("tma4300_ex2_Rmatrix.Rdata")
+source("dmvnorm.R")
+
+y = Oral$Y
+E = Oral$E
+n = length(y)
+
+alpha_v = 1 
+alpha_u = 1
+beta_v = 0.01
+beta_u = 0.01
+M = 70000
+
+MCMC <- function(M){
+  u = rep(0, n) # u = 0 as initial guess
+  u_matrix = matrix(nrow=M, ncol=n) # storing the u-vector for each iteration
+  acceptance_vector = rep(0,M) # storing the acceptance probability for each iteration
+  eta = rep(0, n) # eta=0 as initial guess
+  kappa_u_vec = rep(0,M) # storing the kappa_u value for each iteration
+  kappa_v_vec = rep(0,M) # storing the kappa_v value for each iteration
+  eta_matrix = matrix(nrow = M, ncol = n) # storing the eta-vector for each iteration
+  v_matrix = matrix(nrow = M, ncol = n) # storing the v-vector for each iteration
+  shape_u = (n-1)/2+alpha_u # the shape-parameter for kappa_u
+  shape_v = n/2+alpha_v # the shape-parameter for kappa_v
+  for (i in 1:M){
+    kappa_u = rgamma(1, shape_u, beta_u+0.5*(t(u)%*%R%*%u))  # Gibbs sample
+    kappa_v = rgamma(1, shape_v, beta_v+0.5*(t(eta-u)%*%(eta-u))) # Gibbs sample
+    kappa_u_vec[i] = kappa_u # storing the sample in the matrix
+    kappa_v_vec[i] = kappa_v  # storing the sample in the matrix
+    u_matrix[i,] = u  # storing the sample in the matrix
+    v_matrix[i,] = eta-u  # storing the sample in the matrix
+    eta_matrix[i,] = eta  # storing the sample in the matrix
+    u = t(rmvnorm.canonical(1, b=kappa_v*eta, Q=kappa_v*diag.spam(n)+kappa_u*R)) # Gibbs
+    # Calculating the b and c values for the previous eta. 
+    # These are used for proposing the new eta value
+    b = y+E*exp(eta)*(eta-1) 
+    c = E*exp(eta)
+    
+    # Proposing new eta value
+    Q_matrix = kappa_v*diag.spam(n)+diag.spam(as.numeric(c))
+    eta_prop = t(rmvnorm.canonical(n=1, b=kappa_v*u+b, Q=Q_matrix)) 
+    # Calculating the b and c values for the proposed eta. 
+    # These are used to calculate acceptance rate
+    b_prop = y+E*exp(eta_prop)*(eta_prop-1) 
+    c_prop = E*exp(eta_prop)
+    
+    
+    # The following terms are used in calculation of log_accept_prob
+    eta_precision = kappa_v*diag.spam(n)+diag.spam(as.numeric(c_prop))
+    q_eta = dmvnorm.canonical(eta, kappa_v*u+b_prop, eta_precision)
+    eta_prop_precision = kappa_v*diag.spam(n)+diag.spam(as.numeric(c))
+    q_eta_prop = dmvnorm.canonical(eta_prop, kappa_v*u+b, eta_prop_precision)
+    term1 = -(1/2)*t(eta_prop)%*%(kappa_v*diag.spam(n))%*%eta_prop
+    term2 = (1/2)*t(eta)%*%(kappa_v*diag.spam(n))%*%eta
+    term3 = t(eta_prop)%*%(kappa_v*u)-t(eta)%*%(kappa_v*u)
+    term4 = t(eta_prop)%*%y-t(eta)%*%y
+    term5 = -(t(exp(eta_prop))%*%E-t(exp(eta))%*%E)
+    log_accept_prob = min(0,term1+term2+term3+term4+term5+q_eta-q_eta_prop)
+    
+    acceptance_vector[i] = exp(log_accept_prob) # Storing the acceptance probability
+    if (log(runif(1))<log_accept_prob){ # accept eta_prop
+      eta = eta_prop # If we accept the new step
+      b = b_prop
+      c = c_prop
+    }
+  }
+  return (list("ku" = t(kappa_u_vec), "kv" = t(kappa_v_vec), "eta"=t(eta_matrix), 
+               "v"=t(v_matrix), "u"=t(u_matrix), "acc_prob"=t(acceptance_vector)))
+}  
+
+start_time = Sys.time() # Calculating the run time of the MCMC algorithm with M samples
+mcmc_out = MCMC(M) # output of the algorithm
+end_time = Sys.time()
+total_time = end_time-start_time
+print(paste("Total time used:", total_time))
+print(paste("Average acceptance probability:", mean(mcmc_out$acc_prob)))
+```
+
+# Exercise 3
+
+The following four plots are the entire trace plots for $\kappa_u$ and $\kappa_v$, after 10 and 100 iterations respectively. The first values are omitted since they are very large. But after these initial high values, the chain seems (at least visually) to converge. 
+
+```{r}
+# Trace plots for kappa_u and kappa_v
+par(mfrow=c(2,2))
+plot(mcmc_out$ku[10:M], type="l", xlab="Iteration", ylab="Ku", main="Ku after 10")
+plot(mcmc_out$kv[10:M], type="l", xlab="Iteration", ylab="Kv", main="Kv after 10")
+plot(mcmc_out$ku[100:M], type="l", xlab="Iteration", ylab="Ku", main="Ku after 100")
+plot(mcmc_out$kv[100:M], type="l", xlab="Iteration", ylab="Kv", main="Kv after 100")
+```
+
+We further present trace plots for three randomly chosen districts, along with a histogram of the acceptance probabilities. 
+
+```{r}
+# Drawing 3 random districts to look at their trace plots
+districts = sample(1:n,size = 3, replace = FALSE) 
+# Trace plots for u, v and eta for random district 1
+par(mfrow=c(2,2))
+plot(mcmc_out$u[districts[1],], type="l", xlab="Iteration", ylab="u", main="First random district u")
+plot(mcmc_out$v[districts[1],], type="l", xlab="Iteration", ylab="v", main="First random district v")
+plot(mcmc_out$eta[districts[1],], type="l", xlab="Iteration", ylab="eta", main="First random district eta")
+hist(mcmc_out$acc_prob, main="Histogram of acceptance probabilities")
+
+# Trace plots for u, v and eta for random district 2
+par(mfrow=c(2,2))
+plot(mcmc_out$u[districts[2],], type="l", xlab="Iteration", ylab="u", main="Second random district u")
+plot(mcmc_out$v[districts[2],], type="l", xlab="Iteration", ylab="v", main="Second random district v")
+plot(mcmc_out$eta[districts[2],], type="l", xlab="Iteration", ylab="eta", main="Second random district eta")
+
+# Trace plots for u, v and eta for random district 3
+par(mfrow=c(2,2))
+plot(mcmc_out$u[districts[3],], type="l", xlab="Iteration", ylab="u", main="Third random district u")
+plot(mcmc_out$v[districts[3],], type="l", xlab="Iteration", ylab="v", main="Third random district v")
+plot(mcmc_out$eta[districts[3],], type="l", xlab="Iteration", ylab="eta", main="Third random district eta")
+```
+
+From the plots alone, it is hard to tell how long a burn-in period should be chosen. The geweke diagnostic can help us. 
+We choose a cutoff at 10000 points and apply the geweke diagnostic to the rest.
+The geweke diagnostic is (asymptotically) standard normally distributed under the hypothesis that the samples of the entire chain belongs to the same distribution. 
+```{r}
+# Saving the entire chain in case we want to look at it later
+raw_mcmc = mcmc_out
+burn_in = 10001
+
+# Defining the 10000 first samples as burn-in
+mcmc_out$ku = mcmc_out$ku[burn_in:M]
+mcmc_out$kv = mcmc_out$kv[burn_in:M]
+mcmc_out$eta = mcmc_out$eta[,burn_in:M]
+mcmc_out$v = mcmc_out$v[,burn_in:M]
+mcmc_out$u = mcmc_out$u[,burn_in:M]
+mcmc_out$acc_prob = mcmc_out$acc_prob[burn_in:M]
+
+geweke.diag(mcmc_out$ku)
+geweke.diag(mcmc_out$kv)
+geweke.diag(mcmc_out$u[districts[1],])
+geweke.diag(mcmc_out$eta[districts[1],])
+geweke.diag(mcmc_out$u[districts[2],])
+geweke.diag(mcmc_out$eta[districts[2],])
+geweke.diag(mcmc_out$u[districts[3],])
+geweke.diag(mcmc_out$eta[districts[3],])
+```
+The critical value for a two-tailed z-test at confidence level 95 % is 1.96.
+All of the values have a $z$ with absolute value of less than 1.96, except for the value for $\kappa_u$. Thus, we cannot conlude that the chain has converged after the chosen burn-in period. Let's look at the residual plot after the burn-in to see whether this can give us a clue:
+
+```{r}
+# Trace plots for kappa_u and kappa_v
+plot(c(burn_in:M),mcmc_out$ku, type="l", xlab="Iteration", ylab="Ku", main="Ku after 10000")
+```
+
+
+Then correlation plots follow. 
+```{r}
+# Correlation plots after burn-in
+par(mfrow=c(2,2))
+acf(mcmc_out$ku, main="Correlation ku")
+acf(mcmc_out$kv, main="Correlation kv")
+acf(mcmc_out$u[districts[1],], main="Correlation first district u")
+acf(mcmc_out$eta[districts[1],], main="Correlation first district eta")
+par(mfrow=c(2,2))
+acf(mcmc_out$u[districts[2],], main="Correlation second district u")
+acf(mcmc_out$eta[districts[2],], main="Correlation second district eta")
+acf(mcmc_out$u[districts[3],], main="Correlation third district u")
+acf(mcmc_out$eta[districts[3],], main="Correlation third district eta")
+```
+
+
+
+
+
+
+
+# Exercise 4
+
+
+Now that we know the correlation between the samples, we can say something about the number of independent samples needed to obtain a parameter estimate with the same precision as the MCMC estimate. This measure is called the effective sample size (ESS), and it is defined as
+$$
+\text{ESS}=\frac{N}{\tau},
+$$
+where $N$ is the number of samples from the MCMC-algorithm and $\tau=1+2 \cdot \sum_{k=1}^\infty \rho(k)$. $\rho(k)$ is the correlation at lag $k$. In R, we use the function \texttt{effectiveSize} from the library \texttt{coda} to obtain the ESS. The ESS for $\kappa_u$ and $kappa_v$ is
+
+```{r,eval=TRUE}
+kappa_matrix = matrix(data=c(mcmc_out$ku,mcmc_out$kv),ncol=2)
+colnames(kappa_matrix) = c("kappa_u","kappa_v")
+effSize = effectiveSize(as.mcmc(kappa_matrix))
+effSize
+```
+We see that we only have 1165 and 570 samples for $\kappa_u$ and $\kappa_v$, respectively, even though we have $N=60000$ MCMC-samples. This can be explained by looking at the autocorrelation plots for $\kappa_u$ and $\kappa_v$, which tells us that there is a high correlation between the samples in one iteration to the next. The ESS can be increased by blocking. In practice, this means that $\kappa_u$, $\kappa_v$ and $\mathbf{u}$ are accepted along with $\mathbf{\eta^*}$.
+
+We also want to look at the relative ESS, which is the ESS divided by the running time of the MCMC algorithm. The relative ESS tells us the average number of independent samples generated by our MCMC algorithm every minute. 
+```{r,eval=TRUE}
+effSize/as.double(total_time)
+```
+We see that our MCMC samples on average draws 209 and 102 independent samples every minute. The relative ESS can be used to compare two different MCMC-algorithms, because a more efficient algorithm would produce independent samples faster. Since both the ESS and the running time is linearly increasing with $N$, the relative ESS is independent of the sample size. 
+
+
+# Exercise 5
+We now want to assess how well our initial expectations $\mathbf{E}$ matches our observed values $\mathbf{y}$. Since $y_i\mid \eta_i \sim \text{Pois}(E_i\ \text{exp}(\eta_i))$ for a given district $i$, we would expect $\text{exp}(\eta_i)=1$ if $E_i=y_i$. In order to check if this is true, we plot $e^\mathbf{u_i}$ for every district, since $E(\mathbf{\eta})=\mathbf{u}$. $u_i$ is estimated by taking the posterior median in each district, based on all 60000 samples. 
+```{r, echo=TRUE, eval=TRUE}
+medians = exp(apply((mcmc_out$u), 1, median))
+germany.plot(medians)
+```
+We see from the plot that $e^{u_i}>1$ in some districts, for example in the south-western parts of Germany. Since $e^{u_i}>1$, this indicates that the expected counts $E_i$ is an underestimate of the observed counts $y_i$. Similarly, we see that $e^{u_i} < 1$ in some districts. This means that the expected counts $E_i$ is an overestimate of $y_i$ in these districts. Thus, there is reason to conclude that the expected counts $\mathbf{E}$ fail to capture all the variability in $\mathbf{y}.
+
+From the plot we also see that the $\mathbf{\eta}$-values in neighboring districts are highly correlated. This is especially apparent in the south-western parts of Germany, close to the french border. This indicates that $\mathbf{E}$ fails to capture the correlation between neighboring districts. The reason why $\mathbf{\eta}$ manages to capture this, is becuase $\mathbf{u}$ takes the neighbor-matrix into account. 
+
+
+# Exercise 6
+
+## a) 
+In order to assess the quality of the MCMC-algorithm, we compare it to the model built in \texttt{R-INLA}. The code below shows how this is done. 
+
+```{r,echo=TRUE, eval=TRUE}
+g <- system.file("demodata/germany.graph", package="INLA")
+
+Oral$region.unstruct = Oral$region
+formula1 <- Y ~ -1 +  f(region, model="besag", graph = g, constr=FALSE, hyper=list(prec=list(prior="loggamma", param=c(alpha_u,beta_u))))+f(region.unstruct, model="iid",hyper=list(prec=list(prior="loggamma",param=c(alpha_v,beta_v))))
+result1 <- inla(formula=formula1, family="poisson", data=Oral, E=E, verbose=FALSE, control.compute = list(dic=TRUE))
+```
+The first \texttt{f} in \texttt{formula1} represents the random effect \mathbf{u}, and the second \texttt{f} represents \mathbf{v}.
+
+We now want to compare the samples from the MCMC-algorithm to the posterior marginals obtained by INLA. We will first compare three random districts. 
+
+
+```{r,echo=TRUE, eval=TRUE}
+# First random district
+par(mfrow=c(2,2))
+result1 = inla.hyperpar(result1)
+m = result1$marginals.linear.predictor[[districts[1]]]
+plot(inla.smarginal(m),xlab="x",ylab="y",main="First random district")
+hist(mcmc_out$eta[districts[1],],freq=F,add=T,breaks=60)
+#result1$marginals.random$region[[districts[1]]]
+
+# Second random district
+
+m = result1$marginals.linear.predictor[[districts[2]]]
+plot(inla.smarginal(m),xlab="x",ylab="y",main="Second random district")
+hist(mcmc_out$eta[districts[2],],freq=F,add=T,breaks=60)
+
+
+# Third random district
+m = result1$marginals.linear.predictor[[districts[3]]]
+plot(inla.smarginal(m),xlab="x",ylab="y",main="Third random district")
+hist(mcmc_out$eta[districts[3],],freq=F,add=T,breaks=80)
+
+```
+We see that the histograms and posterior marginals align quite well for the three random districts. Now, let's compare $\kappa_u$ and $\kappa_v$. 
+
+
+```{r,echo=TRUE, eval=TRUE}
+
+# Kappa_u
+
+par(mfrow=c(2,1))
+m = result1$marginals.hyperpar$`Precision for region`
+plot(inla.smarginal(m),xlim=c(10,30))
+hist(mcmc_out$ku,freq=F,add=T,breaks=60)
+
+# Kappa_v
+
+m = result1$marginals.hyperpar$`Precision for region.unstruct`
+plot(inla.smarginal(m),xlim=c(50,400))
+hist(mcmc_out$kv,freq=F,breaks=60,add=T)
+```
+We also see here that the posterior marginals align with the histograms.
+This indicates that MCMC-algorithm has converged. However, one should be careful by concluding that the MCMC-algorithm is implemented correctly. If we have made the same mistake in both models, we would probably end up with the same result. 
+
+## b)
+We now want to assess the effect of smoking on having oral cavity cancer. We add a column in our \texttt{Oral}-data containing information about smoking in each district. 
+
+### 1)
+\texttt{result2} is an INLA model containing smoking as a linear effect.
+```{r,echo=TRUE, eval=TRUE}
+smoking = read.table("smoking.dat")
+Oral["smoking"] = smoking
+formula2 = Y ~ -1 + smoking + f(region, model="besag", constr=FALSE, graph = g, hyper=list(prec=list(prior="loggamma", param=c(alpha_u,beta_u))))+f(region.unstruct, model="iid" ,constr=TRUE,hyper=list(prec=list(prior="loggamma",param=alpha_v,beta_v)))
+
+result2 = inla(formula=formula2, family="poisson", data=Oral, E=E, verbose=FALSE,control.compute = list(dic=TRUE))
+```
+It should be noted that the posterior marginals probably not will align with the histogram of the MCMC-samples, since they come from two different models. The MCMC-algorithm does not include the effect of smoking, while the INLA model does.
+
+### 2)
+Instead of including \texttt{smoking} as a linear effect, we will incorporate it as a non-linear function using a random walk of second order. This model is denoted \texttt{result3} in the code block below. 
+```{r,echo=TRUE, eval=TRUE}
+formula3 = Y ~ -1 + f(smoking, model="rw2") + f(region, model="besag", graph = g,constr=FALSE,hyper=list(prec=list(prior="loggamma", param=c(alpha_u,beta_u))))+f(region.unstruct, model="iid",hyper=list(prec=list(prior="loggamma",param=alpha_v,beta_v)))
+
+result3 = inla(formula=formula3, family="poisson", data=Oral, E=E, verbose=FALSE,control.compute = list(dic=TRUE))
+
+result3$dic$dic
+```
+The deviance information criterion (DIC) is a measure of complexity and fit, and can be used to compare models. It is defined as:
+$$
+\text{DIC} = \bar{\text{D}} + \text{p}_D,
+$$
+where $\bar{\text{D}}$ is the posterior mean of the deviance and $\text{p}_D$ is the number of parameters. A small DIC-value is preferable, because it indicates a better trade-off better complexity and fit. The print-out below shows the DIC-values for the three different INLA-models.
+```{r,echo=TRUE, eval=TRUE}
+result1$dic$dic
+result2$dic$dic
+result3$dic$dic
+```
+We see that the linear effect-model and the random walk-model have almost equal DIC-value, and thus it is difficult to conclude which model is better. DIC does not give a definite answer of which model that is the best. There might exist other criterions that will conclude differently. Still, there is reason to believe that a model containing smoking as an effect is preferable. Because the DIC-values for the models containing smoking are quite equal, there is reason to believe that second random walk-function almost has the same effect as a linear effect. To investigate this further, we plot the posterior median of the random walk-effect along with its $95 \%$ credible interval, in order to assess its linearity. The plot is given below. 
+
+
+```{r,echo=TRUE, eval=TRUE}
+INLA_medians = result3$summary.random$smoking
+plot(INLA_medians$ID, INLA_medians$`0.5quant`,type='l',xlab="x",ylab="y")
+lines(INLA_medians$ID, INLA_medians$`0.025quant`,type='l',lty=2)
+lines(INLA_medians$ID, INLA_medians$`0.975quant`,type='l',lty=2)
+germany.plot(Oral$smoking)
+```
+We see that effect is almost linear, maybe except for the areas around $x=50$ and $x<10$. Thus, the random walk has almost the same effect as the linear effect.
+
+
+
+
