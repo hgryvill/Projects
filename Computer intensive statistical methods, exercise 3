@@ -1,0 +1,793 @@
+---
+title: "Exercise 3, TMA4300"
+author: "Håkon Gryvill, Even M. Myklebust"
+date: "April 9, 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(data.table)
+```
+
+
+# Problem A: Comparing $AR(2)$ parameter estimators using resampling of residuals
+## Part 1):
+
+In this task we are given a data set, called `data3A`, which contains $T=100$ observations from a non-Gaussian time-series, $x_1, \dots, x_T$. We fit two $AR(2)$ models to this time-series. In general, an $AR(2)$ model is specified by the following expression:
+$$
+x_t = \beta_1 x_{t-1}+\beta_2 x_{t-2}+e_t, \qquad \text{for}\ t=3, \dots , T,
+$$
+where $e_t$ are i.i.d. random variables with mean equal to zero and constant variance. In this exercise we will compare two different parameter estimators for $\boldsymbol{\beta} = (\beta_1, \beta_2)$. The two methods we will consider is the least sum of squared residuals (LS) and the least sum of absolute residuals (LA). Their minimizers are called $\boldsymbol{\hat{\beta}}_{LS}$ and $\boldsymbol{\hat{\beta}}_{LA}$, respectively. They are obtained by minimizing their loss functions with respect to $\boldsymbol{\beta}$. The loss functions for LS and LA are
+$$
+Q_{LS}(\mathbf{x}) = \sum_{t=3}^T (x_t - \beta_1 x_{t-1}-\beta_2 x_{t-2})^2 
+$$
+and
+$$
+Q_{LA}(\mathbf{x}) = \sum_{t=3}^T = |x_t- \beta_1 x_{t-1}-\beta_2 x_{t-2}|,
+$$
+respectively.
+We will make one $AR(2)$ model based on each of these two functions.
+Their estimated residuals are defined as
+$$
+\hat{e}_t = x_t - \hat{\beta}_2 x_{t-2}+\hat{\beta}_1 x_{t-1},\text{ for } t = 3, \dots , T.
+$$
+In order to obtain residuals with mean equal to zero, they are re-centered by subtracting their mean, $\bar{e}$:
+$$
+\hat{\epsilon}_t = \hat{e}_t - \bar{e}.
+$$
+We now want to evaluate the relative performance of $\boldsymbol{\hat{\beta}}_{LS}$ and $\boldsymbol{\hat{\beta}}_{LA}$ by estimating their bias and variance. In practice, this is done by bootstrapping. Since we demand independent bootstrap samples, we draw $B=1500$ bootstrap samples from the residuals of each of the fitted $AR(2)$ models. Each bootstrap sample $\hat{\epsilon}^*$ is of size $T$. We then generate a new time-series for every bootstrap sample and compute  $\boldsymbol{\hat{\beta}^*}$ for this time-series, based on either LS or LA. The following code block shows how this was done. 
+
+```{r, echo=TRUE, eval=TRUE}
+source("probAhelp.R")
+source("probAdata.R")
+data = data3A$x # loading data
+T = length(data) # T = 100
+p = 2 # AR(p=2) model
+beta = ARp.beta.est(data, p) # finding beta_LS and beta_LA for "data3A"
+
+B = 1500 # number of bootstrap samples
+eps_hat_LS = ARp.resid(data, beta$LS) # residuals for the time-series when using beta_LS
+eps_hat_LA = ARp.resid(data, beta$LA) # residuals for the time-series when using beta_LA
+
+# making matrices containing the bootstrap 
+# samples of the residuals from LS and LA, respectively:
+bootstrapped_residuals_LS = matrix(NA, nrow=B, ncol=T) 
+bootstrapped_residuals_LA = matrix(NA, nrow=B, ncol=T)
+
+
+for (i in 1:B){
+  # bootstrapping residuals from eps_hat_LS: 
+  bootstrapped_residuals_LS[i,] = sample(eps_hat_LS, size=T, replace=TRUE) 
+  bootstrapped_residuals_LA[i,] = sample(eps_hat_LA, size=T, replace=TRUE) 
+}
+
+# These matrices contain the time-series based on the bootstrapped residuals. 
+# One row for each time-series. 
+bootstrapped_time_series_LS = matrix(NA, nrow=B, ncol=T)
+bootstrapped_time_series_LA = matrix(NA, nrow=B, ncol=T)
+
+
+# These matrices contain the beta-values estimated from 
+# the time-series based on the bootstrapped residuals. 
+# One row for each time-series, i.e. the first column contains the values 
+# for beta_1, and the second column contains for beta_2
+bootstrapped_beta_LS = matrix(NA, nrow=B, ncol=2) 
+bootstrapped_beta_LA = matrix(NA, nrow=B, ncol=2)
+
+
+
+for (i in 1:B){
+  # random_num is used to find a random consecutive subsequence of two elements in "data". 
+  # This is used as a starting sequence "x0" in "filter"
+  random_num = sample(x=c(2:T-1),size=1)
+  
+  # Generating time-series based on the bootstrapped residuals.
+  # Ommitting the first two first values in the time-series,
+  # since they are the starting sequence.
+  bootstrapped_time_series_LS[i,] = ARp.filter(x0=c(data[random_num],data[random_num+1]),
+                              beta=beta$LS, e=bootstrapped_residuals_LS[i,])[-c(1,2)]
+  bootstrapped_time_series_LA[i,] = ARp.filter(x0=c(data[random_num],data[random_num+1]), 
+                              beta=beta$LA, e=bootstrapped_residuals_LA[i,])[-c(1,2)]
+  
+  # Estimating beta-values based on the time-series based on the bootstrapped residuals
+  bootstrapped_beta_LS[i,] = ARp.beta.est(bootstrapped_time_series_LS[i,],p)$LS
+  bootstrapped_beta_LA[i,] = ARp.beta.est(bootstrapped_time_series_LA[i,],p)$LA
+}
+
+```
+
+Now that we have $B$ bootstrap samples for $\hat{\boldsymbol{\beta}}_{LS}$ and $\hat{\boldsymbol{\beta}}_{LA}$, we can estimate their bias and variance. Figure \ref{fig:fig1} to \ref{fig:fig4} show the histograms of the bootstrap samples of $\hat{\beta}_{1,LS}$, $\hat{\beta}_{2,LS}$, $\hat{\beta}_{1,LA}$ and $\hat{\beta}_{1,LA}$. 
+
+```{r fig1, fig.cap="\\label{fig:fig1}Histogram of the bootstrap samples of $\\hat{\\beta}_{1, LS}^*$, compared to $\\hat{\\beta}_{1,LS}$", echo=TRUE, eval=TRUE}
+
+
+# Finding bias and variance for beta_1 and beta_2 for both LS and LA. 
+# Plotting histograms of samples along with the beta-values based on "data"
+
+# LS:
+# beta_1:
+hist(bootstrapped_beta_LS[,1],freq=F,breaks=50, xlim=c(1.2,1.8),
+ main=expression(paste("Histogram of bootstrapped ",hat(beta)[1]," based on LS")),
+ xlab=expression(hat(beta)["1,LS"]^"*"))
+abline(v=beta$LS[1],col="red")
+legend(1.7,6, legend=expression(hat(beta)["1,LS"]),col="red",lty=1) # Adding legend
+# bias and variance:
+bias_LS_beta_1 = (1/B)*sum(bootstrapped_beta_LS[,1])-beta$LS[1]
+variance_LS_beta_1 = var(bootstrapped_beta_LS[,1])
+```
+
+
+```{r fig2, fig.cap="\\label{fig:fig2}Histogram of the bootstrap samples of $\\hat{\\beta}_{2, LS}^*$, compared to $\\hat{\\beta}_{2,LS}$", echo=TRUE, eval=TRUE}
+# beta 2:
+hist(bootstrapped_beta_LS[,2],freq=F, breaks=50, xlim=c(-0.8, -0.2),
+     main=expression(paste("Histogram of bootstrapped ",hat(beta)[2]," based on LS")),
+     xlab=expression(hat(beta)["2,LS"]^"*"))
+abline(v=beta$LS[2],col="red")
+legend(-0.4,6, legend=expression(hat(beta)["2,LS"]),col="red",lty=1) # Adding legend
+# bias and variance:
+bias_LS_beta_2 =(1/B)*sum(bootstrapped_beta_LS[,2])-beta$LS[2]
+variance_LS_beta_2 = var(bootstrapped_beta_LS[,2])
+```
+
+
+```{r fig3, fig.cap="\\label{fig:fig3}Histogram of the bootstrap samples of $\\hat{\\beta}_{1, LA}^*$, compared to $\\hat{\\beta}_{1,LA}$", echo=TRUE, eval=TRUE}
+# LA:
+# beta_1:
+hist(bootstrapped_beta_LA[,1],freq=F,breaks=50, xlim=c(1.45,1.65),
+     main=expression(paste("Histogram of bootstrapped ",hat(beta)[1]," based on LA")),
+     xlab=expression(hat(beta)["1,LA"]^"*"))
+abline(v=beta$LA[1],col="red")
+legend(1.57,20, legend=expression(hat(beta)["1,LA"]),col="red",lty=1) # Adding legend
+# bias and variance:
+bias_LA_beta_1 = (1/B)*sum(bootstrapped_beta_LA[,1])-beta$LA[1]
+variance_LA_beta_1 = var(bootstrapped_beta_LA[,1])
+```
+
+```{r fig4, fig.cap="\\label{fig:fig4}Histogram of the bootstrap samples of $\\hat{\\beta}_{2, LA}^*$, compared to $\\hat{\\beta}_{2,LA}$", echo=TRUE, eval=TRUE}
+# beta_2:
+hist(bootstrapped_beta_LA[,2],breaks=50,freq=F, xlim=c(-0.65, -0.45),
+     main=expression(paste("Histogram of bootstrapped ",hat(beta)[2]," based on LA")),
+     xlab=expression(hat(beta)["2,LA"]^"*"))
+abline(v=beta$LA[2],col="red")
+legend(-0.53,25, legend=expression(hat(beta)["2,LA"]),col="red",lty=1) # Adding legend
+# bias and variance:
+bias_LA_beta_2 = (1/B)*sum(bootstrapped_beta_LA[,2])-beta$LA[2]
+variance_LA_beta_2 = var(bootstrapped_beta_LA[,2])
+```
+
+
+It is difficult to say anything about the bias of the estimators only by looking at the plots, maybe except that both estimators look quite unbiased. Instead we should calculate the bias of the bootstrap samples and compare them. The printout below shows the bias of the estimators:
+
+```{r, echo=TRUE, eval=TRUE}
+# Bias for beta_LS
+bias_LS_beta_1
+bias_LS_beta_2
+
+# Bias for beta_LA
+bias_LA_beta_1
+bias_LA_beta_2
+```
+
+As the figures suggest, the biases are quite small, usually of order $10^{-2}$ or $10^{-3}$. In order to easily compare the biases, we can divide the bias of the components of $\boldsymbol{\hat{\beta}}_{LS}$ by the bias of the components of $\boldsymbol{\hat{\beta}}_{LA}$:
+
+```{r, echo=TRUE, eval=TRUE}
+# Relative bias
+bias_LS_beta_1/bias_LA_beta_1
+bias_LS_beta_2/bias_LA_beta_2
+```
+
+Here we see that the bias of $\boldsymbol{\hat{\beta}}_{LS}$ is approximately `r {round((bias_LS_beta_1/bias_LA_beta_1+bias_LS_beta_2/bias_LA_beta_2)/2,0)}` times as large as the bias for $\boldsymbol{\hat{\beta}}_{LA}$. 
+Let's also have a look at the variance before we make any conclusions.
+We observe a much larger spread in the bootstrap samples of $\hat{\boldsymbol{\beta}}_{LS}$ than the ones for $\hat{\boldsymbol{\beta}}_{LA}$. This might indicate that $\hat{\boldsymbol{\beta}}_{LS}$ has higher variance than $\hat{\boldsymbol{\beta}}_{LA}$. To investigate this further, we estimate the variances of the estimators:
+
+```{r, echo=TRUE, eval=TRUE}
+# Variance for beta_LS:
+variance_LS_beta_1
+variance_LS_beta_2
+
+# Variance for beta_LA:
+variance_LA_beta_1
+variance_LA_beta_2
+```
+
+We can also look at the variances relative to each other, as we did for the bias:
+
+```{r, echo=TRUE, eval=TRUE}
+# Relative variance:
+variance_LS_beta_1/variance_LA_beta_1
+variance_LS_beta_2/variance_LA_beta_2
+```
+
+The variances for the components of $\boldsymbol{\hat{\beta}}_{LS}$ are approximately `r {round((variance_LS_beta_1/(2*variance_LA_beta_1))+(variance_LS_beta_2/(2*variance_LA_beta_2)),0)}` times as large as for $\boldsymbol{\hat{\beta}}_{LA}$. Thus, there is reason to believe that $\boldsymbol{\hat{\beta}}_{LA}$ is the better estimator. This means that even though the LS estimator is optimal for Gaussian AR(p) processes, it is not necessarily also the best estimator for non-Gaussian AR(p) processes. A possible explanaton is that LA is better than LS at handling outliers in the residuals.
+
+
+## Part 2):
+
+Now we want to predict the outcome of the next time step of our given time-series, i.e. $x_{101}$. In practice, this is done by calculating 
+$$
+x_{101}^* = \hat{\beta}^*_1 x_{100} + \hat{\beta}^*_2 x_{99}+\epsilon^*_t,
+$$ 
+for every bootstrap sample $\boldsymbol{\hat{\beta}}^*= (\hat{\beta}^*_1, \hat{\beta}^*_2)$, where $\epsilon^*_t$ is a random sample of the residuals from the original time-series. 
+This is done both for the parameters estimated by LS and LA. The code block below performs this:
+
+```{r, echo=TRUE, eval=TRUE}
+
+# Sampling B = 1500 residuals from the time-series based on "data"
+simulation_101_residuals_LS = sample(eps_hat_LS,size=B, replace=TRUE)  
+simulation_101_residuals_LA = sample(eps_hat_LA,size=B, replace=TRUE) 
+
+
+# Estimating x_101 based on the bootstrapped beta-values and bootstrapped residuals
+x_101_LS = bootstrapped_beta_LS[,2]*data[99]+
+  bootstrapped_beta_LS[,1]*data[100]+simulation_101_residuals_LS 
+x_101_LA = bootstrapped_beta_LA[,2]*data[99]+
+  bootstrapped_beta_LA[,1]*data[100]+simulation_101_residuals_LA 
+
+```
+
+In order to compare the two estimates for $x_{101}$, we compute two $95 \%$ prediction intervals; one based on LS and one based on LA. 
+The following code block calculates a $95 \%$ prediction interval based on LS.
+
+```{r, echo=TRUE, eval=TRUE}
+# Finding the lower and upper limit of empirical 95 % prediction interval for x_101
+alpha = 0.05
+
+# LS:
+# mean and limits of 95 % prediction interval
+sorted_x_101_LS = sort(x_101_LS)
+lower_limit_LS = sorted_x_101_LS[ceiling(B*alpha/2)]
+upper_limit_LS = sorted_x_101_LS[ceiling(B*(1-alpha/2))]
+mean_x_101_LS = mean(x_101_LS)
+upper_limit_LS
+lower_limit_LS
+```
+
+The $95 \%$ prediction interval for $x_{101}$ is [`r {round(lower_limit_LS,2)}`, `r {round(upper_limit_LS,2)}`]. Figure \ref{fig:fig5} shows the histogram of the predictions of $x_{101}$ based on LS, in addition to the mean and the limits of the prediction interval.
+
+```{r fig5, fig.cap="\\label{fig:fig5}Histogram of estimates of $x_{101}$, based on LS. The estimated mean and limits of the 95 % prediction interval are shown as vertical lines.", echo=TRUE, eval=TRUE}
+# Histogram of estimates 
+hist(x_101_LS,breaks=50, freq=F, main=expression(paste("Histogram of esimates of "
+                              ,x[101], " based on LS.")),xlab=expression(x[101]^{"*"}))
+abline(v=c(mean_x_101_LS, upper_limit_LS, lower_limit_LS),col=c("red","green","green"))
+legend(upper_limit_LS+0.5,0.3, 
+       legend=c("Estimated mean","Limits of 95 % \n prediction interval"),
+       col=c("red","green"),lty=c(1,1)) # Adding legend
+```
+
+In order to get an insight into how wide this interval is, we plot the mean of the predictions and the limits of the $95 \%$ prediction interval along with the original time-series, shown in figure \ref{fig:fig6}.
+
+```{r fig6, fig.cap="\\label{fig:fig6}The original time-series is displayed as black dots. The estimated mean and limits of the 95 % prediction interval for $x_{101}$ based on LS are shown as green and red dots, as specified by the legend.", echo=TRUE, eval=TRUE}
+# The original time-series plotted together with the mean of the estimated value of x_101
+plot(c(1:100, rep(100,3)),c(data,mean_x_101_LS, upper_limit_LS, lower_limit_LS),
+     col=c(rep("black",T),"red","green","green"),xlab="t",ylab=expression(x[t]))
+legend(0,60,legend=c("Original time-series",
+                     expression(paste("Estimated mean of ", x[101], " based on LS")),
+    "Limits of 95 % prediction interval"), col=c("black","red","green"),pch=c(1,1,1))
+```
+
+Based on figure \ref{fig:fig6}, it is safe to say that the predicted value is realistic, and that prediction interval is quite wide.
+
+Let's have a look at the predictions based on LA. The printout below shows the limits of the $95 \%$ prediction interval for $x_{101}$ based on LA.
+```{r, echo=TRUE, eval=TRUE}
+# LA: 
+# mean and limits of 95 % prediction interval
+sorted_x_101_LA = sort(x_101_LA)
+lower_limit_LA = sorted_x_101_LA[ceiling(B*alpha/2)]
+upper_limit_LA = sorted_x_101_LA[ceiling(B*(1-alpha/2))]
+mean_x_101_LA = mean(x_101_LA)
+upper_limit_LA
+lower_limit_LA
+```
+
+Figure \ref{fig:fig7} shows the histogram of the predictions of $x_{101}$ based on LA.
+
+```{r fig7, fig.cap="\\label{fig:fig7}Histogram of estimates of $x_{101}$, based on LA. The estimated mean and limits of the 95 % prediction interval are shown as vertical lines.", echo=TRUE, eval=TRUE}
+# Histogram of estimates 
+hist(x_101_LA,breaks=50, freq=F, main=expression(paste("Histogram of esimates of ",x[101],
+                                        " based on LA.")),xlab=expression(x[101]^{"*"}))
+abline(v=c(mean_x_101_LA, upper_limit_LA, lower_limit_LA),col=c("red","green","green"))
+legend(upper_limit_LA+0.5,0.3, legend=c("Estimated mean",
+              "Limits of 95 % \n prediction interval"),col=c("red","green"),lty=c(1,1))
+```
+
+The prediction histograms for $x_{101}$ based on LS and LA appear to be quite equal.
+The $95 \%$ prediction interval based on LA is [`r {round(lower_limit_LA,2)}`, `r {round(upper_limit_LA,2)}`]. Figure \ref{fig:fig8} displays the original time-series along with the mean and limits of the $95 \%$ prediction interval. We see that this plot is not dramatically different from the equivalent plot for LS.
+
+```{r fig8, fig.cap="\\label{fig:fig8}The original time-series is displayed as black dots. The estimated mean and limits of the 95 % prediction interval for $x_{101}$ based on LA are shown as green and red dots, as specified by the legend.", echo=TRUE, eval=TRUE}
+# The original time-series plotted together with the mean of the estimated value of x_101
+plot(c(1:100, rep(100,3)),c(data,mean_x_101_LA, upper_limit_LA, lower_limit_LA),
+     col=c(rep("black",T),"red","green","green"),xlab="t",ylab=expression(x[t]))
+legend(0,60,legend=c("Original time-series","Estimated mean of x_101 based on LA",
+    "Limits of 95 % prediction interval"),col=c("black","red","green"),pch=c(1,1,1))
+```
+
+The variability of the simulated $x_{101}$ values reflects both our lack of knowledge about $\boldsymbol{\beta}$ and our lack of knowledge about the residual distribution. As stated in task A1, $\boldsymbol{\hat{\beta}}_{LA}$ has smaller variance than $\boldsymbol{\hat{\beta}}_{LS}$. This is arguably the reason why the prediction interval based on LA is a little smaller than the one for LS. However, we see that the prediction intervals are almost equal, even though $\boldsymbol{\hat{\beta}}_{LA}$ has much smaller variance than $\boldsymbol{\hat{\beta}}_{LS}$. This might suggest that much of the variability in the simulated values of $x_{101}$ stems from our lack of knowledge about the residual distribution. 
+
+\clearpage
+
+# Problem B: Permutation test to compare bilirubin levels
+## Part 1):
+In this exercise we have three persons with $n_i$ measurements of the bilirubin level in their blood for each of them. 
+We want to model the logarithm of the Bilirubin level as a fixed value plus noise:
+
+$$
+\text{log} Y_{ij} = \beta_i + \epsilon_{ij}, \qquad \text{with} \enspace  i = 1,2,3 \enspace \text{and} \enspace  j = 1, \dots, n_i
+$$
+Our null hypothesis is that the three persons have the same bilirubin level: $\beta_1 = \beta_2 = \beta_3$.
+
+We will perform an F-statistic test to see if the deviation in bilirubin levels between the persons is significant or not. Figure \ref{fig:boxplot} shows a boxplot of the measured values for the three persons in log scale. The medians of person 1 and 2's measurements have about the same value, but the data for person 1 has larger variance. Person 3's data has a higher median value, and almost the same variance as person 1. Note that there seems to be no overlap between the values of the middle 50 % data of persons 2 and 3. Though there are few samples, this gives us further reason to believe that the null hypothesis will be rejected.
+
+```{r, boxplot, fig.cap="\\label{fig:boxplot}Boxplot of logarithm samples for the three persons in question."}
+# Read data
+bilirubin <- read.table("bilirubin.txt",header=T)
+# Make boxplot
+boxplot(log(meas)~pers, data=bilirubin, main="Logarithm of Bilirubin per person",
+        xlab="Person",ylab=expression(log(Y[i])))
+```
+
+We then fit the model to the data and perform the F-test:
+
+```{r}
+# Fit fixed value model to data
+linearmodel = lm(log(meas)~pers, data=bilirubin)
+summary(linearmodel)
+Fval = summary(linearmodel)$fstatistic[1]
+```
+
+The p-value of the F-test is 0.03946. That means that the null hypothesis is rejected at confidence level 0.05. The F test value, which we will use later, is `r {round(Fval,6)}`.
+
+## Part 2):
+
+Now we will perform a permutation test, which is another way of finding a value for the F-statistic. It will then be interesting to see if these F-values are similar or not. First, we write a function to perform the test:
+
+```{r}
+# 
+n1 = 11; n2 = 10; n3 = 8; n = n1+n2+n3
+# Function: permTest
+# In each iteration, test samples are shuffled into three new groups of equal size
+# as originally 
+# We then gather the Fvalues from fitting the model to the shuffled data
+permTest = function(B){
+  Fsamples = c()
+  for (i in 1:B){
+    permBilirubin = copy(bilirubin)
+    permBilirubin$meas = sample(bilirubin$meas, replace = FALSE) # sampling measurements
+    thisfit = lm(log(meas)~pers, data=permBilirubin) # fitting a linear model
+    thisFvalue = summary(thisfit)$fstatistic[1] # extracting F-value
+    Fsamples = c(Fsamples, thisFvalue) # appending F-value to list
+  }
+  return(Fsamples)
+}
+```
+
+## Part 3):
+
+In the Permutation test, we randomly reassign the samples into three new groups of equal size as the original groups. We then gather the F-values from fitting the model to the shuffled data. This is repeated 999 times, and we then check how many of these random sample F-values are more extreme than the F-value from the fitted model to the original data.
+```{r}
+# Performing the Permutation test and calculating the new pvalue
+B = 999
+Fsamples = permTest(B)
+newpval = sum(Fsamples >= Fval)/B
+```
+
+The p-value from the permutation test varies quite a lot when run with different random seeds, but for this particular run it is `r {round(newpval,6)}`. 
+
+A p-value also has a distribution, so some variance is to be expected, but for most of the trials it lies close to the p-value from the fixed value model fitted in part 1. To further explore the distribution of the permutation test, we ran the algorithm 100 times and made a histogram, shown in figure \ref{fig:phist}. The figure also shows the median of the p-values and the 95 % empirical confidence intervals.
+
+```{r, phist, fig.cap="\\label{fig:phist}Histogram of the p-values for 100 different permutation tests."}
+# Running permutation test algorithm 100 times to look at the distribution of its p value
+p_list = c()
+B = 999
+for (i in 1:100){
+  Fsamples = permTest(B)
+  newpval = sum(Fsamples >= Fval)/B
+  p_list = c(p_list, newpval)
+}
+
+# Finding the lower and upper limit of empirical 95 % confidence interval for the p value
+alpha = 0.05
+# mean and limits of 95 % prediction interval
+sorted_p_list = sort(p_list)
+lower_limit_p = sorted_p_list[ceiling(100*alpha/2)]
+upper_limit_p = sorted_p_list[ceiling(100*(1-alpha/2))]
+median_p_list = median(p_list)
+# Plotting histogram of pvalues from permutation test
+hist(p_list,breaks=30, main="Histogram of p-values from the permutation test",
+     xlab="p-value",xlim=c(0.025,0.06))
+abline(v=c(median_p_list, lower_limit_p, upper_limit_p),col=c("red","green","green"))
+legend(0.045, 9, legend=c("Median",
+              "Limits of 95 % \n confidence interval"),col=c("red","green"),lty=c(1,1))
+```
+
+The median of the p values from the permutation test is `r {round(median_p_list,6)}`, which is `r {abs(round(median_p_list,6) - 0.03946)/0.03946*100}` $\%$ different from the p-value from fitting the model on the original data, which was 0.03946.
+Also, the majority of the p-values lies below 0.05, which we choose as significance level. Based on this together with the original p-value, we choose to reject the null hypothesis. Our conclusion is then that the three persons do not have the same bilirubin level.  
+
+\clearpage
+
+# Problem C: The EM-algorithm and bootstrapping
+
+
+In this task we are given two sequences of independent random variables, namely $\boldsymbol{x} = x_1, \dots , x_n$ and $\boldsymbol{y} = y_1, \dots, y_n$. We have that $x_i \sim exp(\lambda_0)$ and $y_i \sim exp(\lambda_1), \text{ for } i = 1,\dots, n$. However, we do not observe $x_1, \dots , x_n, y_1, \dots , y_n$, but rather $u_1, \dots , u_n$ and $z_1, \dots , z_n$. They are defined as
+
+$$
+z_i = \max(x_i, y_i,)
+$$
+and
+$$
+u_i = I(x_i \geq y_i), \qquad \text{for } i = 1,\dots n.
+$$
+That is, $z_i$ is the largest value of $x_i$ and $y_i$, and $u_i$ tells us whether $z_i=x_i$ or $z_i=y_i$.
+The aim of this task is to find the maximum likelihood estimators $\hat{\lambda}_0$ and $\hat{\lambda}_1$, based on $n=200$ samples of $z_i$ and $u_i$.
+
+This is done by using the expectation-maximization (EM) algorithm. In practice, this means that we propose values for $\hat{\lambda}_0$ and $\hat{\lambda}_1$, which we denote $\hat{\lambda}^{(t)}_0$ and $\hat{\lambda}^{(t)}_1$. Further, we find the values of $\lambda_0$ and $\lambda_1$ that maximizes the expected log likelihood, given our proposed values for $\hat{\lambda}_0$ and $\hat{\lambda}_1$. These values are used as $\hat{\lambda}^{(t)}_0$ and $\hat{\lambda}^{(t)}_1$ in the next iteration of the algorithm. This is done iteratively until the proposed values $\hat{\lambda}^{(t)}_0$ and $\hat{\lambda}^{(t)}_1$ are (approximately) equal to the maximizers of the expected log likelihood. That is, when the estimates for $\hat{\lambda}_0$ and $\hat{\lambda}_1$ in two consecutive iterations are approximately equal.
+
+The reason why we do not maximize the log likelihood is because $\boldsymbol{x}$ and $\boldsymbol{y}$ are unknown. Thus we have to maximize the expected value of the log likelihood, given our proposed parameters.
+In order to use the EM-algorith, we need to find the expression for the expected log likelihood.
+
+## Part 1):
+
+First, we find the expression for the likelihood function. It is specified as
+$$
+L(\lambda_0, \lambda_1 |\boldsymbol{x},\boldsymbol{y}) = \prod_{i=1}^n f(x_i |\lambda_0, \lambda_1) f(y_i |\lambda_0, \lambda_1) 
+$$
+
+$$
+= \lambda_0^n \lambda_1^n e^{-\lambda_0 \sum_{i=1}^n x_i} e^{-\lambda_1 \sum_{i=1}^n y_i}   
+$$
+The log likelihood is then
+$$
+l(\lambda_0, \lambda_1 |\boldsymbol{x}, \boldsymbol{y}) = n\cdot\ln(\lambda_0+\lambda_1)-\lambda_0 \sum_{i=1}^n x_i -\lambda_1 \sum_{i=1}^n y_i.
+$$
+Now that we have the expression for the log likelihood given $\boldsymbol{x}$ and $\boldsymbol{y}$, we can the derive the expression for the expected log likelihood, given $\boldsymbol{z}$, $\boldsymbol{u}$, $\lambda_0^{(t)}$ and $\lambda_1^{(t)}$. It is given by
+
+$$
+E(\ln{f( x, y | \lambda_0, \lambda_1)}| \boldsymbol{z}, \boldsymbol{u}, \lambda_0^{(t)}, \lambda_1^{(t)}) = E(n\cdot\ln(\lambda_0+\lambda_1)-\lambda_0 \sum_{i=1}^n x_i -\lambda_1 \sum_{i=1}^n y_i). 
+$$
+$$
+= n\cdot\ln(\lambda_0+\lambda_1)-\lambda_0 \sum_{i=1}^n E(x_i| \boldsymbol{z}, \boldsymbol{u}, \lambda_0^{(t)}, \lambda_1^{(t)}) -\lambda_1 \sum_{i=1}^n E(y_i| \boldsymbol{z}, \boldsymbol{u}, \lambda_0^{(t)}, \lambda_1^{(t)}).
+$$
+In order to calculate $E(x_i| z, u, \lambda_0^{(t)}, \lambda_1^{(t)})$ we use the following fact: $x_i \geq y_i$ or $x_i < y_i$. In the case where $x_i \geq y_i$, we have that $u_i = 1$ and $x_i = z_i$. Thus $x_i = u_i z_i$. Whenever $x_i < y_i$, we need to calculate the expected value of $x_i$ given that $x_i < y_i$. Since we don't know the true value of $\lambda_0$, we assume that $x_i \sim exp(\lambda_0^{(t)})$. $\lambda_0^{(t)}$ is our best guess for $\lambda_0$, and in the EM-algorithm this is the maximizer from the previous iteration. $E(x_i |\lambda_0^{(t)}, \lambda_1^{(t)}, x_i < y_i = z_i)$ can be written as
+$$
+E(x_i |\lambda_0^{(t)}, \lambda_1^{(t)}, x_i < y_i = z_i) = \int_{0}^{z_i} x_i P(x_i |\lambda_0^{(t)}, \lambda_1^{(t)}, x_i <  z_i) dx_i, 
+$$
+where 
+$$
+P(x_i |\lambda_0^{(t)}, \lambda_1^{(t)}, x_i < z_i) = \frac{f(x_i|\lambda_0^{(t)}, \lambda_1^{(t)})}{P(x_i < z_i|\lambda_0^{(t)}, \lambda_1^{(t)})}.
+$$
+Since we assume $x_i \sim exp(\lambda_0^{(t)})$, we can write $P(x_i < z_i|\lambda_0^{(t)}, \lambda_1^{(t)})=F_{x_i|\lambda_0^{(t)}, \lambda_1^{(t)}}(z_i)=1-e^{-\lambda_0^{(t)}z_i}$. Thus, we have that
+$$
+\int_{0}^{z_i} x_i f(x_i |\lambda_0^{(t)}, \lambda_1^{(t)},x_i < z_i) dx_i = \frac{1}{1-e^{-\lambda_0^{(t)} z_i}} \int_0^{z_i}x_i f(x_i|\lambda_0^{(t)}, \lambda_1^{(t)}) dx_i = \frac{1}{1-e^{-\lambda_0^{(t)} z_i}} \int_0^{z_i}x_i \lambda_0^{(t)} e^{\lambda_0^{(t)} x_i} dx_i.
+$$
+This integral can be solved using integration by parts. The details of the calculations are ommitted. We obtain the following expression for $E(x_i |x_i < y_i)$:
+$$
+\frac{1}{1-e^{-\lambda_0^{(t)} z_i}} \cdot \bigg(\frac{1}{\lambda_0^{(t)}}-\frac{z_i+1/\lambda_0^{(t)}}{e^{\lambda_0^{(t)} z_i}}\bigg).
+$$
+This can be rewritten as:
+
+$$
+\frac{1}{\lambda_0^{(t)}}-\frac{z_i}{e^{\lambda_0^{(t)} z_i}-1}.
+$$
+
+Thus we have that:
+$$
+E(x_i |\lambda_0^{(t)}, \lambda_1^{(t)}, x_i < z_i) = u_i z_i + (1-u_i)\bigg(\frac{1}{\lambda_0^{(t)}}-\frac{z_i}{e^{\lambda_0^{(t)} z_i}-1}\bigg).
+$$
+The derivation of $E(y_i|\lambda_0^{(t)}, \lambda_1^{(t)})$ is quite similar. Since $u_i=0$ when $y_i = z_i$, and $y_i \sim exp(\lambda_1^{(t)})$, we get the following expression
+$$
+E(y_i|\lambda_0^{(t)}, \lambda_1^{(t)}, y_i < z_i) = (1-u_i) z_i + u_i\bigg(\frac{1}{\lambda_1^{(t)}}-\frac{z_i}{e^{\lambda_1^{(t)} z_i}-1}\bigg).
+$$
+ 
+
+That is, we get following expression for $E(\ln{f( x, y | \lambda_0, \lambda_1)}| z, u, \lambda_0^{(t)}, \lambda_1^{(t)})$:
+
+$$
+E(\ln{f( x, y | \lambda_0, \lambda_1)}| z, u, \lambda_0^{(t)}, \lambda_1^{(t)}) = n\cdot\ln(\lambda_0+\lambda_1)
+$$
+$$
+-\lambda_0 \sum_{i=1}^n u_i z_i + (1-u_i)\bigg(\frac{1}{\lambda_0^{(t)}}-\frac{z_i}{e^{\lambda_0^{(t)} z_i}-1}\bigg) 
+$$
+$$
+-\lambda_1 \sum_{i=1}^n (1-u_i) z_i + u_i\bigg(\frac{1}{\lambda_1^{(t)}}-\frac{z_i}{e^{\lambda_1^{(t)} z_i}-1}\bigg).
+$$
+
+
+## Part 2:
+
+We now want to perform the EM-algorithm with the derived expression for $E(\ln{f( x, y | \lambda_0, \lambda_1)}| z, u, \lambda_0^{(t)}, \lambda_1^{(t)})$ to find the maximum likelihood estimators for $\lambda_0$ and $\lambda_1$. In order to make the algorithm run faster (and to simplify it), we find the optimal values of $\lambda_0$ and $\lambda_1$ analytically by derivation:
+
+$$
+\frac{\partial E(\ln{f( x, y | \lambda_0, \lambda_1)}| z, u, \lambda_0^{(t)}, \lambda_1^{(t)})}{\partial \lambda_0} = \frac{n}{\lambda_0}-\sum_{i=1}^n u_i z_i + (1-u_i)\bigg(\frac{1}{\lambda_0^{(t)}}-\frac{z_i}{e^{\lambda_0^{(t)} z_i}-1}\bigg) 
+$$
+
+$$
+\frac{\partial E(\ln{f( x, y | \lambda_0, \lambda_1)}| z, u, \lambda_0^{(t)}, \lambda_1^{(t)})}{\partial \lambda_1} =  \frac{n}{\lambda_1} - \sum_{i=1}^n (1-u_i) z_i + u_i\bigg(\frac{1}{\lambda_1^{(t)}}-\frac{z_i}{e^{\lambda_1^{(t)} z_i}-1}\bigg).
+$$
+In order to find the values that maximizes the expression, we set the derivatives equal to zero and solve them for $\lambda_0$ and $\lambda_1$, respectively.
+We then obtain:
+
+$$
+\hat{\lambda}_0 = \frac{n}{\sum_{i=1}^n u_i z_i + (1-u_i)\bigg(\frac{1}{\lambda_0^{(t)}}-\frac{z_i}{e^{\lambda_0^{(t)} z_i}-1}\bigg)}
+$$
+
+$$
+\hat{\lambda}_1 = \frac{n}{\sum_{i=1}^n (1-u_i) z_i + u_i\bigg(\frac{1}{\lambda_1^{(t)}}-\frac{z_i}{e^{\lambda_1^{(t)} z_i}-1}\bigg)}
+$$
+Note that
+
+$$
+\frac{\partial^2 E(\ln{f( x, y | \lambda_0, \lambda_1)}| z, u, \lambda_0^{(t)}, \lambda_1^{(t)})}{\partial \lambda_0^2} = -\frac{n}{\lambda_0^2}<0
+$$
+and
+$$
+\frac{\partial^2 E(\ln{f( x, y | \lambda_0, \lambda_1)}| z, u, \lambda_0^{(t)}, \lambda_1^{(t)})}{\partial \lambda_1^2} = -\frac{n}{\lambda_1^2}<0.
+$$
+This means that $\hat{\lambda}_0$ and $\hat{\lambda}_1$ are maximizers, and not minimizers.
+The code for the EM-algorithm is given below.
+
+```{r, echo=TRUE, eval=TRUE}
+
+# Function returning the lambda_0-value maximizing the log likelihood
+max_lambda_0 = function(u, z, lambda_t){
+  return (n/sum(u*z+(rep(1,n)-u)*((1/lambda_t[1])-(z/(exp(lambda_t[1]*z)-1)))))
+}
+
+# Function returning the lambda_1-value maximizing the log likelihood
+max_lambda_1 = function(u, z, lambda_t){
+  return (n/sum((rep(1,n)-u)*z+u*((1/lambda_t[2])-(z/(exp(lambda_t[2]*z)-1)))))
+}
+
+u = read.table("u.txt",header=FALSE)[,1] # loading data
+z = read.table("z.txt",header=FALSE)[,1] # loading data
+
+t = 2
+
+# We say that the EM-algorithm has converges if the 
+# difference between lambda in one iteration and the previous is less than "tol"
+tol = 10^-10 
+n = length(u)
+
+# matrix containing the estimates of lambda in each iteration
+lambda = matrix(ncol=2, nrow=2) 
+lambda[1,] = c(0.5, 0.5) # Initial guesses for lambda_0 and lambda_1
+
+# doing one iteration of the EM-algorithm.
+lambda[2,] = c(max_lambda_0(u,z,lambda[1,]), max_lambda_1(u,z,lambda[1,]))  
+# This is needed in order to prevent an error when entering the while-loop.
+
+
+# The EM-algorithm: 
+while (max(lambda[t,]-lambda[t-1,])>tol){ 
+  t = t + 1
+  lambda = rbind(lambda,c(max_lambda_0(u,z,lambda[t-1,]), max_lambda_1(u,z,lambda[t-1,])))
+}
+
+final_lambda = lambda[t,]
+final_lambda
+
+```
+We obtain the values `r {round(final_lambda[1],2)}` and `r {round(final_lambda[2],2)}` for $\hat{\lambda}_0$ and $\hat{\lambda}_1$, respectively.
+In order to assess the convergence rate of the algorithm, we plot $\lambda_0^{(t)}$ and $\lambda_1^{(t)}$ for each iteration, as displayed in figures \ref{fig:fig9} and \ref{fig:fig10}.
+
+
+```{r fig9, fig.cap="\\label{fig:fig9}$\\lambda_0^{(t)}$ for each iteration in the EM-algorithm.", echo=TRUE, eval=TRUE}
+# Plotting the estimates in each iteration
+plot(lambda[1:t,1], main=expression(paste("Convergence of ",lambda[0]^(t))),
+     xlab="Iteration", ylab=expression(lambda[0]^(t)))
+```
+
+```{r fig10, fig.cap="\\label{fig:fig10}$\\lambda_1^{(t)}$ for each iteration in the EM-algorithm.", echo=TRUE, eval=TRUE}
+plot(lambda[1:t,2], main=expression(paste("Convergence of ",lambda[1]^(t))), 
+     xlab="Iteration", ylab=expression(lambda[1]^(t)))
+```
+
+We see that algorithm converges almost instantly. The EM-algorithm almost converges in 2 iterations for $\lambda_0$, while it takes approximately 6 iterations for $\lambda_1$ to converge. The algorithm stops whenever the difference in $\lambda$ from one iteration and the next is less than $10^{-10}$. This is the reason why the algorithm spends `r {t}` iterations to complete. 
+
+## Part 3):
+
+We now want to approximate the correlation between $\hat{\lambda}_0$ and $\hat{\lambda}_1$, in addition to their biases and standard deviations. 
+We will do bootstrapping to estimate this.
+The following pseudocode shows how bootstrapping is done in combination with the EM-algorithm:
+```
+B = number of bootstrap samples (10000)
+n = number of elements in each bootstrap sample (200)
+
+for each bootstrap sample b = 1, ..., B
+  u*, z* = n bootstrapped pairs of u_i and z_i, from given data sets "u.txt" and "z.txt"
+  lambda_0*, lambda_1* =  EM-algorithm(u*, z*)
+```
+We make $B=10000$ bootstrap samples of $u_i$ and $z_i$, where each bootstrap sample contains $n=200$ samples. $u_i$ and $z_i$ are sampled in pairs, since they are correlated. We then perform the EM-algorithm on each bootstrap sample, in order to obtain $B$ bootstrap samples of $\hat{\lambda}_0$ and $\hat{\lambda}_1$. 
+
+```{r,echo=TRUE, eval=TRUE}
+
+B = 10000 # Doing 10000 bootstrap samples
+
+# Matrices containing the bootstrapped u-values.
+# Each row is one bootstrap sample of n=200 u-values
+bootstrapped_u = matrix(ncol=n, nrow=B) 
+bootstrapped_z = matrix(ncol=n, nrow=B) 
+
+# bootstrapping indexes instead of u and z directly. 
+# This is done to make sure that u and z are bootstrapped in pairs. 
+# u and z are pairwise correlated, and thus we need to bootstrap them in pairs.
+bootstrapped_indexes = sample(1:n, size=n, replace=TRUE)  
+
+# matrix containing the lambda-estimates for each bootstrap sample
+bootstrapped_lambda = matrix(ncol=2, nrow=B) 
+
+EM_algorithm = function(u, z){ # Returns the lambda-estimates for one bootstrap sample
+  t = 2
+  lambda = matrix(ncol=2, nrow=2)
+  lambda[1,]= c(0.5, 0.5)
+  lambda[2,] = c(max_lambda_0(u,z,lambda[1,]), max_lambda_1(u,z,lambda[1,]))
+
+  while (max(lambda[t,]-lambda[t-1,])>tol){
+    t = t + 1
+    lambda = rbind(lambda,c(max_lambda_0(u,z,lambda[t-1,]), max_lambda_1(u,z,lambda[t-1,])))
+  }
+  return (lambda[t,])
+}
+
+
+for (i in 1:B){
+  bootstrapped_indexes = sample(1:n, size=n, replace=TRUE)  
+  bootstrapped_u[i,] = u[bootstrapped_indexes] 
+  bootstrapped_z[i,] = z[bootstrapped_indexes]
+  
+  # performing the EM-algorithm on each bootstrap sample.
+  bootstrapped_lambda[i,] = EM_algorithm(bootstrapped_u[i,], bootstrapped_z[i,]) 
+}
+
+
+```
+
+The bootstrap samples of $\hat{\lambda}_0$ and $\hat{\lambda}_1$ are visualized in figures \ref{fig:fig11} and \ref{fig:fig12}.
+
+```{r fig11, fig.cap="\\label{fig:fig11}Histogram of the bootstrap samples of $\\hat{\\lambda}_{0}$. The red line shows $\\hat{\\lambda}_{0}$.", echo=TRUE, eval=TRUE}
+# Plotting the bootstrapped lambda-values, and comparing to the beta-values 
+# obtained by the original dataset (namely "u.txt" and "z.txt")
+
+# lambda_0
+hist(bootstrapped_lambda[,1],freq=FALSE, breaks=50,
+     main=expression(paste("Histogram of the bootstrap samples of ",
+                           hat(lambda[0]))),xlab=expression(hat(lambda)[0]))
+abline(v=final_lambda[1],col="red")
+legend(final_lambda[1]+0.5,1, legend=expression(hat(lambda)[0]), col="red",lty=1)
+```
+
+
+```{r fig12, fig.cap="\\label{fig:fig12}Histogram of the bootstrap samples of $\\hat{\\lambda}_{1}$. The red line shows $\\hat{\\lambda}_{1}$.", echo=TRUE, eval=TRUE}
+# lambda_1
+hist(bootstrapped_lambda[,2],freq=FALSE,breaks=50,
+     main=expression(paste("Histogram of the bootstrap samples of ",
+                           hat(lambda[1]))),xlab=expression(hat(lambda)[1]))
+abline(v=final_lambda[2],col="red")
+legend(final_lambda[2]+1,0.4, legend=expression(hat(lambda)[1]), col="red",lty=1)
+```
+
+By looking at the plots, the bootstrap samples appear to be quite unbiased. However, the samples seem to be a lot of variability in the samples. 
+Before we draw any conclusions about the bootstrap samples, let's also have a look at the correlation, standard deviations and biases:
+
+```{r, echo=TRUE, eval=TRUE}
+# Bias and standard deviation:
+# Lambda 0:
+standard_dev_lambda_0 = sd(bootstrapped_lambda[,1])
+standard_dev_lambda_0
+bias_lambda_0 = mean(bootstrapped_lambda[,1])-final_lambda[1]
+bias_lambda_0
+
+# Lambda 1:
+standard_dev_lambda_1 = sd(bootstrapped_lambda[,2])
+standard_dev_lambda_1
+bias_lambda_1 = mean(bootstrapped_lambda[,2])-final_lambda[2]
+
+bias_lambda_1
+
+# Correlation:
+correlation_lambda_0_1 = cor(bootstrapped_lambda[,1],bootstrapped_lambda[,2])
+correlation_lambda_0_1
+```
+
+The printout shows that the estimated biases for $\hat{\lambda}_0$ and $\hat{\lambda}_1$ are approximately `r {round(bias_lambda_0,3)}` and `r {round(bias_lambda_1,3)}`, while the estimated standard deviations are `r {round(standard_dev_lambda_0,3)}` and `r {round(standard_dev_lambda_1,3)}`. One should be careful by concluding that the biases are either very small or very large, since they depend greatly on the situation. That is why we also should have a look at the bias relative to its expected value. The printout below shows the relative bias in percent, that is, the bias of the estimators divided by $\hat{\lambda}_0$ and  $\hat{\lambda}_1$, respectively.
+
+```{r, echo=TRUE, eval=TRUE}
+rel_bias_lambda_0 = bias_lambda_0*100/final_lambda[1]
+rel_bias_lambda_1 = bias_lambda_1*100/final_lambda[2]
+rel_bias_lambda_0
+rel_bias_lambda_1
+```
+
+The relative biases for $\hat{\lambda}_0$ and $\hat{\lambda}_1$ are approximately `r {round(rel_bias_lambda_0,2)}`% and `r {round(rel_bias_lambda_1,2)}`%. 
+Based on these values, we believe that bias correcting the estimators will be to little use. For all we know, bias correcting might even add more variability to the estimators, since $\hat{\lambda}_0$ and $\hat{\lambda}_1$ are not constants, but rather estimates of the true parameter values. 
+
+
+
+## Part 4):
+We now want to find $\hat{\lambda}_0$ and $\hat{\lambda}_1$ numerically or, if possible, analytically.
+First, we find an analytical formula for $f_{Z_i, U_i}(z_i, u_i | \lambda_0, \lambda_1)$. This can be found by first deriving the cumulative distribution function (cdf). We split the cdf into two parts, one for $u_i = 0$, and one for $u_i = 1$:
+$$
+F_{Z_i, U_i}(z_i,u_i| \lambda_0, \lambda_1)= \begin{cases} F_{Z_i,  U_i = 0}(z| \lambda_0, \lambda_1) \\ F_{Z_i, U_i = 1}(z| \lambda_0, \lambda_1) \end{cases} 
+= \begin{cases} P(Z_i<z, U_i = 0| \lambda_0, \lambda_1) \\ P(Z_i<z, U_i = 1| \lambda_0, \lambda_1)\end{cases}
+$$
+The expression for $P(Z_i<z, U_i = 0)$ is:
+$$
+P(Z_i<z, U_i = 0| \lambda_0, \lambda_1) = P(\max(X_i, Y_i)<z, X_i < Y_i| \lambda_0, \lambda_1) = P(X_i < z, Y_i < z, X_i < Y_i| \lambda_0, \lambda_1) 
+$$
+
+$$
+P(X_i < z, Y_i < z, X_i < Y_i| \lambda_0, \lambda_1) = P(Y_i < z, X_i < Y_i| \lambda_0, \lambda_1) = \int_{0}^z \int_{0}^{Y_i} \lambda_0 \lambda_1 e^{-\lambda_0 X_i} e^{-\lambda_1 Y_i}dX_i dY_i
+$$
+The details of the calculations are ommitted. We obtain the following expression
+$$
+P(Z_i<z, U_i = 0| \lambda_0, \lambda_1) = \frac{\lambda_0}{\lambda_0+\lambda_1}-e^{-\lambda_1 z} + \frac{\lambda_1}{\lambda_0+\lambda_1}e^{-z(\lambda_0+\lambda_1)}.
+$$
+
+$P(Z_i<z, U_i = 1)$ is calculated in the exact same manner, except that $X_i$ and $\lambda_0$ are swapped with $Y_i$ and $\lambda_1$.
+Thus, we end up with 
+$$
+P(Z_i<z, U_i = 1| \lambda_0, \lambda_1) = \frac{\lambda_1}{\lambda_0+\lambda_1}-e^{-\lambda_0 z} + \frac{\lambda_0}{\lambda_0+\lambda_1}e^{-z(\lambda_0+\lambda_1)}.
+$$
+To find probability density function (pdf), we take the derivative of the cdf with respect to $z$, and insert $z=z_i$:
+$$
+f(Z_i = z_i, U_i = u| \lambda_0, \lambda_1) = \begin{cases}f(Z_i = z_i, U_i = 0| \lambda_0, \lambda_1) \\ f(Z_i = z_i, U_i = 1| \lambda_0, \lambda_1)\end{cases}
+$$
+$$
+= \begin{cases}\lambda_1 e^{-\lambda_1 z_i} - \lambda_1 e^{-(\lambda_0+\lambda_1)z_i}=\lambda_1 e^{-\lambda_1 z_i} (1-e^{-\lambda_0 z_i}), \text{ for } u=0,\\ \lambda_0 e^{-\lambda_0 z_i} - \lambda_0 e^{-(\lambda_0+\lambda_1)z_i} = \lambda_0 e^{-\lambda_0 z_i} (1-e^{-\lambda_1 z_i}), \text{ for } u=1, \end{cases}
+$$
+The likelihood function for $\lambda_0$ and $\lambda_1$ is then
+$$
+L(\lambda_0, \lambda_1|\boldsymbol{z}, \boldsymbol{u}) = \prod_{i=1}^n f(Z_i = z_i, U_i = u| \lambda_0, \lambda_1) = \prod_{i; u_i=1}f(Z_i=z_i,U_i=1|\lambda_0, \lambda_1)\cdot \prod_{i; u_i=0}f(Z_i=z_i,U_i=0|\lambda_0, \lambda_1).
+$$
+
+The log likelihood is then
+$$
+l(\lambda_0, \lambda_1|\boldsymbol{z}, \boldsymbol{u}) = \sum_{i;u_i=1} \ln( \lambda_0 e^{-\lambda_0 z_i} (1-e^{-\lambda_1 z_i})) + \sum_{i;u_i=0}\ln(\lambda_1 e^{-\lambda_1 z_i} (1-e^{-\lambda_0 z_i}))
+$$
+$$
+= \sum_{i=1}^n u_i\cdot\ln( \lambda_0 e^{-\lambda_0 z_i} (1-e^{-\lambda_1 z_i})) + (1-u_i)\cdot\ln(\lambda_1 e^{-\lambda_1 z_i} (1-e^{-\lambda_0 z_i})).
+$$
+To find the maximum likelihood estimators, we take the derivative with respect to $\lambda_0$ and $\lambda_1$:
+
+$$
+\frac{\partial l(\lambda_0, \lambda_1 |\boldsymbol{z},\boldsymbol{u})}{\partial \lambda_0} = \sum_{i=1}^n u_i \cdot \bigg(\frac{1}{\lambda_0}-z_i\bigg)+(1-u_i)\cdot \frac{e^{-\lambda_0 z_i}}{1-e^{-\lambda_0 z_i}},
+$$
+$$
+\frac{\partial l(\lambda_0, \lambda_1 |\boldsymbol{z},\boldsymbol{u})}{\partial \lambda_1} = \sum_{i=1}^n u_i \cdot \frac{e^{-\lambda_1 z_i}}{1-e^{-\lambda_1 z_i}} +(1-u_i)\cdot \bigg(\frac{1}{\lambda_1}-z_i\bigg).
+$$
+However, the calculations for deriving the maximum likelihood estimators $\hat{\lambda}_0$ and $\hat{\lambda}_1$ turn out to be impossible. That is why we compute them numerically. The function `log_likelihood_lambda` computes the log likelihood for a specific pair of values of $\lambda_0$ and $\lambda_1$. We use the built-in function `optim` to find the maximizers of the log likelihood. 
+
+```{r, echo=TRUE, eval=TRUE}
+# the log likelihood function for lambda_0 and lambda_1
+log_likelihood_lambda = function(lambda){ 
+  sum = 0
+  u = read.table("u.txt",header=FALSE)[,1] # loading data
+  z = read.table("z.txt",header=FALSE)[,1] # loading data
+  for (i in 1:length(u)){
+    if (u[i]==1){ # U_i = 1
+      # adding ln(lambda_0*exp(-lambda_0*z_i)*(1-exp(lambda_1*z_i))) to the sum
+      sum = sum + log(lambda[1]*exp(-lambda[1]*z[i])*(1-exp(-lambda[2]*z[i]))) 
+    }
+    else { # if U_i = 0
+      # adding ln(lambda_1*exp(-lambda_1*z_i)*(1-exp(lambda_0*z_i))) to the sum
+      sum = sum + log(lambda[2]*exp(-lambda[2]*z[i])*(1-exp(-lambda[1]*z[i])))
+    }
+  }
+  return (sum)
+}
+
+# fnscale = -1 to optimize
+mle = optim(par=c(5,5),fn=log_likelihood_lambda,control = list(fnscale = -1)) 
+mle$par
+```
+
+We obtain the value `r {round(mle[[1]][1],2)}` for $\hat{\lambda}_0$ and `r {round(mle[[1]][2],2)}` for $\hat{\lambda}_1$. These values match very well with the results from the EM-algorithm in part C2. Thus, there is reason to believe that our EM-algorithm is implemented correctly.
+
+There are both advantages and disadvantages of using the EM-algorithm, compared to optimizing the likelihood directly. In our case, the advantage is that EM-algorithm converges very quickly. Even though the EM-algorithm is guaranteed to converge, it is not guaranteed to converge fast. If our starting values for $\lambda_0$ and $\lambda_1$ are far away from the maximum, it may take many iterations before it converges. Another disadvantage is that the standard errors are not directly available. 
+
+However, the standard errors are available when optimizing numerically. The `optim`-function returns the Hessian $H$ of objective function at the optimal value. The standard deviations of the estimators are given by the square root of the diagonal elements of $-H^{-1}$. 
+
+
+
+
+
